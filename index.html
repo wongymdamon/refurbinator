@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>新世紀復修戰士 - 雲端戰力系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+TC:wght@300;500;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .font-orbitron { font-family: 'Orbitron', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .lucide { display: inline-block; vertical-align: middle; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #4f46e5; border-radius: 10px; }
+        
+        @keyframes radar-pulse {
+            0% { filter: drop-shadow(0 0 2px rgba(79, 70, 229, 0.4)); }
+            50% { filter: drop-shadow(0 0 8px rgba(79, 70, 229, 0.8)); }
+            100% { filter: drop-shadow(0 0 2px rgba(79, 70, 229, 0.4)); }
+        }
+        .radar-poly { animation: radar-pulse 3s infinite ease-in-out; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const { useState, useMemo, useEffect, useRef } = React;
+
+        // Firebase 配置與初始化
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'evangelion-warrior-sys';
+
+        // Lucide Icon 組件
+        const Icon = ({ name, size = 24, className = "" }) => {
+            const ref = useRef(null);
+            useEffect(() => {
+                const renderIcon = () => {
+                    if (ref.current && window.lucide && window.lucide.icons) {
+                        const iconName = name.charAt(0).toUpperCase() + name.slice(1);
+                        const iconNode = window.lucide.icons[name] || window.lucide.icons[iconName] || window.lucide.icons.HelpCircle;
+                        if (iconNode && Array.isArray(iconNode)) {
+                            ref.current.innerHTML = '';
+                            const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                            const rootAttrs = iconNode[1] || {};
+                            const attrs = { 
+                                ...rootAttrs, width: size, height: size, 
+                                class: `lucide lucide-${name.toLowerCase()} ${className}`,
+                                fill: "none", stroke: "currentColor", "stroke-width": "2",
+                                "stroke-linecap": "round", "stroke-linejoin": "round"
+                            };
+                            Object.entries(attrs).forEach(([key, value]) => svg.setAttribute(key, value));
+                            if (Array.isArray(iconNode[2])) {
+                                iconNode[2].forEach((child) => {
+                                    if (Array.isArray(child) && child.length >= 2) {
+                                        const element = document.createElementNS("http://www.w3.org/2000/svg", child[0]);
+                                        Object.entries(child[1] || {}).forEach(([k, v]) => element.setAttribute(k, v));
+                                        svg.appendChild(element);
+                                    }
+                                });
+                            }
+                            ref.current.appendChild(svg);
+                        }
+                    }
+                };
+                renderIcon();
+                const timer = setTimeout(renderIcon, 100);
+                return () => clearTimeout(timer);
+            }, [name, size, className]);
+            return React.createElement('span', { ref, className: "inline-flex items-center justify-center leading-none" });
+        };
+
+        // 雷達圖組件
+        const RadarChart = ({ stats = {}, size = 200 }) => {
+            const labels = ["態度", "出勤", "溝通", "技術", "創意", "抱負"];
+            const keys = ["attitude", "attendance", "communication", "skill", "creative", "ambition"];
+            const center = size / 2;
+            const radius = size * 0.35;
+            const getPoint = (index, value) => {
+                const angle = (Math.PI * 2 / 6) * index - Math.PI / 2;
+                const r = (radius * (value || 0)) / 5;
+                return { x: center + r * Math.cos(angle), y: center + r * Math.sin(angle) };
+            };
+            const points = keys.map((key, i) => getPoint(i, stats[key] || 0));
+            const polygonPoints = points.map(p => `${p.x},${p.y}`).join(" ");
+
+            return React.createElement('div', { className: "flex flex-col items-center" }, 
+                React.createElement('svg', { width: size, height: size, className: "overflow-visible" },
+                    [1, 2, 3, 4, 5].map(tick => (
+                        React.createElement('polygon', { key: tick, points: keys.map((_, i) => { const p = getPoint(i, tick); return `${p.x},${p.y}`; }).join(" "), fill: "none", className: "stroke-slate-200 dark:stroke-slate-700", strokeWidth: "1" })
+                    )),
+                    keys.map((_, i) => { const p = getPoint(i, 5); return React.createElement('line', { key: i, x1: center, y1: center, x2: p.x, y2: p.y, className: "stroke-slate-200 dark:stroke-slate-700", strokeWidth: "1" }); }),
+                    React.createElement('polygon', { points: polygonPoints, fill: "rgba(79, 70, 229, 0.4)", className: "stroke-indigo-500 radar-poly", strokeWidth: "2" }),
+                    labels.map((label, i) => { const p = getPoint(i, 5.8); return React.createElement('text', { key: i, x: p.x, y: p.y, textAnchor: "middle", dominantBaseline: "middle", className: "text-[10px] font-bold fill-slate-500 dark:fill-slate-400" }, label); })
+                )
+            );
+        };
+
+        const initialStats = { attitude: 3, attendance: 3, communication: 3, skill: 3, creative: 3, ambition: 3 };
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [users, setUsers] = useState([]);
+            const [records, setRecords] = useState([]);
+            const [currentUserData, setCurrentUserData] = useState(null);
+            const [isDarkMode, setIsDarkMode] = useState(true);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [view, setView] = useState('login'); 
+            
+            const [authForm, setAuthForm] = useState({ username: '', password: '', org: '' });
+            const [authError, setAuthError] = useState('');
+            const [formData, setFormData] = useState({ category: '', content: '', datetime: '', duration: '' });
+
+            // 1. 初始化 Auth
+            useEffect(() => {
+                const initAuth = async () => {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                };
+                initAuth();
+                const unsubscribe = onAuthStateChanged(auth, setUser);
+                return () => unsubscribe();
+            }, []);
+
+            // 2. 當 Auth 成功後，獲取數據
+            useEffect(() => {
+                if (!user) return;
+
+                // 獲取所有用戶
+                const usersQuery = collection(db, 'artifacts', appId, 'public', 'data', 'users');
+                const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
+                    const usersList = snapshot.docs.map(doc => doc.data());
+                    setUsers(usersList);
+                }, (err) => console.error("Users sync error:", err));
+
+                // 獲取所有紀錄
+                const recordsQuery = collection(db, 'artifacts', appId, 'public', 'data', 'records');
+                const unsubscribeRecords = onSnapshot(recordsQuery, (snapshot) => {
+                    const recordsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // 簡單排序：最新在前
+                    recordsList.sort((a, b) => b.createdAt - a.createdAt);
+                    setRecords(recordsList);
+                }, (err) => console.error("Records sync error:", err));
+
+                return () => {
+                    unsubscribeUsers();
+                    unsubscribeRecords();
+                };
+            }, [user]);
+
+            const handleAuthChange = (e) => setAuthForm({ ...authForm, [e.target.name]: e.target.value });
+            const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const foundUser = users.find(u => u.username === authForm.username && u.password === authForm.password);
+                if (foundUser) {
+                    if (foundUser.status === 'pending') { setAuthError('資格審核中，導師批准後方可進入。'); return; }
+                    setCurrentUserData(foundUser);
+                    setAuthError('');
+                } else { setAuthError('代號或密鑰錯誤'); }
+            };
+
+            const handleRegister = async (e) => {
+                e.preventDefault();
+                if (users.find(u => u.username === authForm.username)) {
+                    setAuthError('此代號已被佔用');
+                    return;
+                }
+                const newUser = { 
+                    username: authForm.username,
+                    password: authForm.password,
+                    org: authForm.org,
+                    role: 'user', 
+                    status: 'pending', 
+                    stats: { ...initialStats }, 
+                    comment: '',
+                    createdAt: Date.now()
+                };
+                try {
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', authForm.username), newUser);
+                    setView('login');
+                    setAuthError('登記成功！請聯絡導師核准資格。');
+                } catch (err) {
+                    setAuthError('連線雲端失敗，請稍後再試。');
+                }
+            };
+
+            const handleApproveUser = async (username) => {
+                if (!user) return;
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', username), { status: 'approved' });
+            };
+
+            const handleApproveRecord = async (recordId) => {
+                if (!user) return;
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'records', recordId), { status: 'approved' });
+            };
+
+            const handleRejectRecord = async (recordId) => {
+                if (!user) return;
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'records', recordId));
+            };
+
+            const handleUpdateStats = async (username, key, val) => {
+                if (!user) return;
+                const numericVal = parseInt(val) || 1;
+                const userRef = users.find(u => u.username === username);
+                const newStats = { ...(userRef.stats || initialStats), [key]: numericVal };
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', username), { stats: newStats });
+            };
+
+            const handleUpdateComment = async (username, commentText) => {
+                if (!user || commentText.length > 30) return;
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', username), { comment: commentText });
+            };
+
+            // 排行榜計算: 總時數 x (戰力總分 / 30)
+            const approvedRecords = useMemo(() => records.filter(r => r.status === 'approved'), [records]);
+            
+            const leaderboard = useMemo(() => {
+                const statsMap = {};
+                approvedRecords.forEach(r => {
+                    if (!statsMap[r.name]) {
+                        const u = users.find(usr => usr.username === r.name);
+                        statsMap[r.name] = { name: r.name, org: u?.org || '未知', totalHours: 0, userRef: u };
+                    }
+                    statsMap[r.name].totalHours += r.duration;
+                });
+                return Object.values(statsMap).map(s => {
+                    const uStats = s.userRef?.stats || initialStats;
+                    const totalStatsScore = Object.values(uStats).reduce((a, b) => a + b, 0);
+                    const calculatedScore = s.totalHours * (totalStatsScore / 30);
+                    return { ...s, score: calculatedScore.toFixed(2) };
+                }).sort((a, b) => b.score - a.score);
+            }, [approvedRecords, users]);
+
+            // 個人統計
+            const userStatsSummary = useMemo(() => {
+                if (!currentUserData) return { totalHours: 0, catCounts: {} };
+                const myRecords = approvedRecords.filter(r => r.name === currentUserData.username);
+                const totalHours = myRecords.reduce((acc, curr) => acc + curr.duration, 0);
+                const catCounts = myRecords.reduce((acc, curr) => {
+                    acc[curr.category] = (acc[curr.category] || 0) + 1;
+                    return acc;
+                }, {});
+                return { totalHours, catCounts };
+            }, [approvedRecords, currentUserData]);
+
+            const inputClass = "w-full p-4 bg-slate-50 dark:bg-black border border-slate-200 dark:border-slate-800 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-slate-900 dark:text-white";
+
+            if (!currentUserData) {
+                return React.createElement('div', { className: isDarkMode ? 'dark' : '' },
+                    React.createElement('div', { className: "min-h-screen bg-slate-100 dark:bg-black flex items-center justify-center p-4" },
+                        React.createElement('div', { className: "max-w-md w-full bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200 dark:border-indigo-500/30" },
+                            React.createElement('div', { className: "p-10 bg-indigo-600 text-white text-center relative overflow-hidden" },
+                                React.createElement('div', { className: "relative z-10" },
+                                    React.createElement('h1', { className: "text-3xl font-black tracking-widest mb-1" }, "新世紀復修戰士"),
+                                    React.createElement('p', { className: "font-orbitron text-indigo-300 text-[10px] tracking-[0.3em] uppercase" }, view === 'login' ? 'Mission Access' : 'New Recruit')
+                                ),
+                                React.createElement('div', { className: "absolute top-0 right-0 p-4 opacity-20" }, React.createElement(Icon, { name: "Cpu", size: 80 }))
+                            ),
+                            React.createElement('div', { className: "p-8" },
+                                view === 'login' ? React.createElement('form', { onSubmit: handleLogin, className: "space-y-4" },
+                                    React.createElement('input', { name: "username", required: true, className: inputClass, placeholder: "特工代號", onChange: handleAuthChange }),
+                                    React.createElement('input', { name: "password", type: "password", required: true, className: inputClass, placeholder: "安全密鑰", onChange: handleAuthChange }),
+                                    authError && React.createElement('div', { className: `text-xs text-center ${authError.includes('成功') ? 'text-green-500' : 'text-red-500'}` }, authError),
+                                    React.createElement('button', { className: "w-full py-5 bg-indigo-600 text-white rounded-2xl font-black font-orbitron tracking-widest hover:bg-indigo-700 transition-all" }, "START MISSION"),
+                                    React.createElement('button', { type: "button", onClick: () => setView('register'), className: "w-full text-center text-xs font-bold text-slate-400 hover:text-indigo-500 mt-2" }, "新戰士登記 / REGISTER")
+                                ) : React.createElement('form', { onSubmit: handleRegister, className: "space-y-4" },
+                                    React.createElement('input', { name: "username", required: true, className: inputClass, placeholder: "代號 (登入用)", onChange: handleAuthChange }),
+                                    React.createElement('input', { name: "password", type: "password", required: true, className: inputClass, placeholder: "設置密鑰", onChange: handleAuthChange }),
+                                    React.createElement('input', { name: "org", required: true, className: inputClass, placeholder: "所屬機構 / 學校", onChange: handleAuthChange }),
+                                    authError && React.createElement('div', { className: "text-red-500 text-xs text-center" }, authError),
+                                    React.createElement('button', { className: "w-full py-5 bg-emerald-600 text-white rounded-2xl font-black font-orbitron tracking-widest" }, "SUBMIT APPLICATION"),
+                                    React.createElement('button', { type: "button", onClick: () => setView('login'), className: "w-full text-center text-xs font-bold text-slate-400 hover:text-indigo-500 mt-2" }, "返回登入 / CANCEL")
+                                )
+                            )
+                        )
+                    )
+                );
+            }
+
+            const actualUserData = users.find(u => u.username === currentUserData.username) || currentUserData;
+
+            return React.createElement('div', { className: isDarkMode ? 'dark' : '' },
+                React.createElement('div', { className: "min-h-screen bg-slate-50 dark:bg-black text-slate-800 dark:text-slate-300 transition-colors pb-20" },
+                    React.createElement('header', { className: "bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-indigo-500/20 sticky top-0 z-50" },
+                        React.createElement('div', { className: "max-w-7xl mx-auto px-6 py-4 flex justify-between items-center" },
+                            React.createElement('div', { className: "flex items-center gap-3" },
+                                React.createElement(Icon, { name: "Cpu", className: "text-indigo-600" }),
+                                React.createElement('div', null,
+                                    React.createElement('div', { className: "font-black dark:text-white uppercase tracking-tighter" }, "新世紀復修戰士"),
+                                    React.createElement('div', { className: "font-orbitron text-[8px] text-indigo-500 font-bold tracking-[0.2em]" }, `OPERATOR: ${currentUserData.username}`)
+                                )
+                            ),
+                            React.createElement('div', { className: "flex items-center gap-4" },
+                                React.createElement('nav', { className: "hidden md:flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1" },
+                                    React.createElement('button', { onClick:()=>setActiveTab('dashboard'), className: `px-4 py-2 rounded-lg text-[10px] font-black ${activeTab==='dashboard'?'bg-indigo-600 text-white':'text-slate-400'}` }, "DASHBOARD"),
+                                    React.createElement('button', { onClick:()=>setActiveTab('history'), className: `px-4 py-2 rounded-lg text-[10px] font-black ${activeTab==='history'?'bg-indigo-600 text-white':'text-slate-400'}` }, "LOGS"),
+                                    actualUserData.role === 'admin' && React.createElement('button', { onClick:()=>setActiveTab('admin'), className: `px-4 py-2 rounded-lg text-[10px] font-black ${activeTab==='admin'?'bg-amber-500 text-black':'text-amber-500/50'}` }, "COMMAND")
+                                ),
+                                React.createElement('button', { onClick: () => setIsDarkMode(!isDarkMode), className: "p-2 bg-slate-100 dark:bg-slate-800 rounded-lg" }, React.createElement(Icon, { name: isDarkMode ? "Sun" : "Moon", size: 18 })),
+                                React.createElement('button', { onClick: () => setCurrentUserData(null), className: "text-red-500 font-black text-xs" }, "LOGOUT")
+                            )
+                        )
+                    ),
+
+                    React.createElement('main', { className: "max-w-7xl mx-auto px-6 py-8" },
+                        activeTab === 'dashboard' && React.createElement('div', { className: "grid grid-cols-1 lg:grid-cols-12 gap-8" },
+                            React.createElement('div', { className: "lg:col-span-4 space-y-6" },
+                                React.createElement('div', { className: "bg-white dark:bg-slate-900 p-8 rounded-[2rem] border dark:border-indigo-500/20 shadow-xl" },
+                                    React.createElement('h2', { className: "text-lg font-black mb-6 text-indigo-500 flex items-center gap-2" }, React.createElement(Icon, { name: "Activity", size: 20 }), "戰力分析儀 / STATUS"),
+                                    React.createElement(RadarChart, { stats: actualUserData.stats || initialStats, size: 260 }),
+                                    React.createElement('div', { className: "mt-6 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border dark:border-slate-700" },
+                                        React.createElement('div', { className: "text-[10px] font-black text-slate-400 mb-3 uppercase flex items-center gap-1" }, React.createElement(Icon, { name: "BarChart2", size: 14 }), "服務數據統計 (已審核)"),
+                                        React.createElement('div', { className: "flex justify-between items-end mb-4" },
+                                            React.createElement('div', { className: "text-3xl font-black text-indigo-500 font-orbitron" }, userStatsSummary.totalHours, React.createElement('span', { className: "text-xs ml-1" }, "H")),
+                                            React.createElement('div', { className: "text-[10px] font-bold opacity-40" }, "總服務時數")
+                                        ),
+                                        React.createElement('div', { className: "grid grid-cols-3 gap-2" },
+                                            ['回收', '復修', '全人發展'].map(cat => React.createElement('div', { key: cat, className: "bg-white dark:bg-black/40 p-2 rounded-xl text-center" },
+                                                React.createElement('div', { className: "text-[8px] font-bold text-slate-400" }, cat),
+                                                React.createElement('div', { className: "text-xs font-black text-indigo-400" }, (userStatsSummary.catCounts[cat] || 0) + "次")
+                                            ))
+                                        )
+                                    ),
+                                    React.createElement('div', { className: "mt-4 p-4 bg-indigo-50 dark:bg-indigo-500/10 rounded-2xl border border-indigo-100 dark:border-indigo-500/20" },
+                                        React.createElement('div', { className: "text-[10px] font-black text-indigo-600 mb-2 uppercase flex items-center gap-1" }, React.createElement(Icon, { name: "MessageSquare", size: 14 }), "導師評語"),
+                                        React.createElement('div', { className: "text-sm font-bold" }, actualUserData.comment || "期待你的表現！")
+                                    )
+                                ),
+                                React.createElement('div', { className: "bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800 shadow-xl" },
+                                    React.createElement('form', { onSubmit: async (e) => {
+                                        e.preventDefault();
+                                        if(!formData.category || !user) return;
+                                        const newDoc = {
+                                            name: currentUserData.username,
+                                            org: currentUserData.org,
+                                            category: formData.category,
+                                            content: formData.content,
+                                            datetime: formData.datetime,
+                                            duration: parseFloat(formData.duration) || 0,
+                                            status: 'pending',
+                                            createdAt: Date.now()
+                                        };
+                                        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'records'), newDoc);
+                                        setFormData({category:'', content:'', datetime:'', duration:''});
+                                        setActiveTab('history');
+                                    }, className: "space-y-4" },
+                                        React.createElement('h3', { className: "font-black text-sm uppercase text-slate-400 tracking-widest" }, "任務回報 / REPORT"),
+                                        React.createElement('select', { name: "category", required: true, className: inputClass, value: formData.category, onChange: handleInputChange },
+                                            React.createElement('option', { value: "", disabled: true }, "-- 類別 --"),
+                                            React.createElement('option', { value: "回收" }, "回收"),
+                                            React.createElement('option', { value: "復修" }, "復修"),
+                                            React.createElement('option', { value: "全人發展" }, "全人發展")
+                                        ),
+                                        React.createElement('textarea', { name: "content", required: true, className: inputClass, placeholder: "內容描述...", value: formData.content, onChange: handleInputChange }),
+                                        React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+                                            React.createElement('input', { type: "datetime-local", name: "datetime", required: true, className: inputClass, value: formData.datetime, onChange: handleInputChange }),
+                                            React.createElement('input', { type: "number", step: "0.5", name: "duration", required: true, placeholder: "時數", className: inputClass, value: formData.duration, onChange: handleInputChange })
+                                        ),
+                                        React.createElement('button', { className: "w-full py-4 bg-indigo-600 text-white rounded-2xl font-black font-orbitron text-xs hover:bg-indigo-700 transition-all" }, "SUBMIT MISSION")
+                                    )
+                                )
+                            ),
+                            React.createElement('div', { className: "lg:col-span-8" },
+                                React.createElement('div', { className: "bg-white dark:bg-slate-900 rounded-[2.5rem] overflow-hidden shadow-xl border dark:border-slate-800" },
+                                    React.createElement('div', { className: "p-6 bg-slate-50 dark:bg-slate-800 font-black border-b dark:border-slate-800 flex justify-between" },
+                                        React.createElement('span', { className: "flex items-center gap-2" }, React.createElement(Icon, { name: "Trophy", size: 18, className: "text-amber-500" }), "戰士排行 (時數 × 戰力/30)"),
+                                        React.createElement('span', { className: "text-[10px] opacity-40 font-orbitron" }, "GLOBAL RANKING")
+                                    ),
+                                    React.createElement('div', { className: "divide-y dark:divide-slate-800" },
+                                        leaderboard.map((s, i) => React.createElement('div', { key: i, className: "p-6 flex justify-between items-center" },
+                                            React.createElement('div', { className: "flex gap-4 items-center" },
+                                                React.createElement('span', { className: "text-2xl font-black italic text-indigo-500 opacity-30 w-8" }, `#${i+1}`),
+                                                React.createElement('div', null,
+                                                    React.createElement('div', { className: "font-black" }, s.name),
+                                                    React.createElement('div', { className: "text-[10px] opacity-40" }, s.org)
+                                                )
+                                            ),
+                                            React.createElement('div', { className: "text-right" },
+                                                React.createElement('div', { className: "text-2xl font-black text-indigo-500 font-orbitron" }, s.score),
+                                                React.createElement('div', { className: "text-[10px] text-slate-400 font-mono uppercase" }, "EXP SCORE")
+                                            )
+                                        ))
+                                    )
+                                )
+                            )
+                        ),
+
+                        activeTab === 'history' && React.createElement('div', { className: "bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border dark:border-slate-800 overflow-hidden" },
+                            React.createElement('div', { className: "p-6 border-b dark:border-slate-800 font-black text-indigo-500" }, "任務日誌 / MISSION LOGS"),
+                            React.createElement('div', { className: "overflow-x-auto" },
+                                React.createElement('table', { className: "w-full text-left" },
+                                    React.createElement('thead', { className: "bg-slate-50 dark:bg-slate-950 text-[10px] font-black uppercase text-slate-400" },
+                                        React.createElement('tr', null,
+                                            React.createElement('th', { className: "p-6" }, "Status"),
+                                            React.createElement('th', { className: "p-6" }, "Warrior"),
+                                            React.createElement('th', { className: "p-6" }, "Category"),
+                                            React.createElement('th', { className: "p-6" }, "Description"),
+                                            React.createElement('th', { className: "p-6" }, "Hours")
+                                        )
+                                    ),
+                                    React.createElement('tbody', { className: "divide-y dark:divide-slate-800" },
+                                        records.map(r => React.createElement('tr', { key: r.id, className: r.status==='pending'?'bg-amber-500/5':'' },
+                                            React.createElement('td', { className: "p-6" }, 
+                                                r.status==='approved' ? 
+                                                React.createElement('span', { className: "text-[9px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded" }, "Verified") : 
+                                                React.createElement('span', { className: "text-[9px] font-black text-amber-500 bg-amber-500/10 px-2 py-1 rounded" }, "Pending")
+                                            ),
+                                            React.createElement('td', { className: "p-6 font-bold" }, r.name),
+                                            React.createElement('td', { className: "p-6" }, r.category),
+                                            React.createElement('td', { className: "p-6 text-sm opacity-70" }, r.content),
+                                            React.createElement('td', { className: "p-6 font-black text-indigo-500" }, `${r.duration}H`)
+                                        ))
+                                    )
+                                )
+                            )
+                        ),
+
+                        activeTab === 'admin' && actualUserData.role === 'admin' && React.createElement('div', { className: "space-y-8" },
+                            React.createElement('div', { className: "grid grid-cols-1 lg:grid-cols-2 gap-8" },
+                                React.createElement('div', { className: "bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border overflow-hidden" },
+                                    React.createElement('div', { className: "p-6 bg-slate-50 font-black flex items-center gap-2" }, React.createElement(Icon, { name: "UserPlus", size: 18 }), "待核准新戰士"),
+                                    users.filter(u=>u.status==='pending').map(u=>React.createElement('div', { key: u.username, className: "p-6 flex justify-between border-t" },
+                                        React.createElement('div', null, React.createElement('div', { className: "font-black" }, u.username), React.createElement('div', { className: "text-xs opacity-50" }, u.org)),
+                                        React.createElement('button', { onClick:()=>handleApproveUser(u.username), className: "px-4 py-2 bg-emerald-500 text-white rounded-xl text-xs font-black" }, "核准")
+                                    ))
+                                ),
+                                React.createElement('div', { className: "bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border overflow-hidden" },
+                                    React.createElement('div', { className: "p-6 bg-slate-50 font-black flex items-center gap-2" }, React.createElement(Icon, { name: "ClipboardCheck", size: 18 }), "待核准任務"),
+                                    records.filter(r=>r.status==='pending').map(r=>React.createElement('div', { key: r.id, className: "p-6 border-t" },
+                                        React.createElement('div', { className: "flex justify-between mb-2" }, React.createElement('span', { className: "font-black text-indigo-500" }, r.name), React.createElement('span', { className: "font-bold text-amber-500" }, `${r.duration}H`)),
+                                        React.createElement('p', { className: "text-xs italic mb-3" }, r.content),
+                                        React.createElement('div', { className: "flex gap-2" },
+                                            React.createElement('button', { onClick:()=>handleApproveRecord(r.id), className: "flex-1 py-2 bg-emerald-500 text-white rounded-xl text-xs font-black" }, "批准"),
+                                            React.createElement('button', { onClick:()=>handleRejectRecord(r.id), className: "flex-1 py-2 bg-red-500/10 text-red-500 rounded-xl text-xs font-black" }, "拒絕")
+                                        )
+                                    ))
+                                )
+                            ),
+                            React.createElement('div', { className: "bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border overflow-hidden" },
+                                React.createElement('div', { className: "p-6 font-black border-b uppercase tracking-widest text-indigo-500" }, "戰士能力調控儀"),
+                                users.filter(u=>u.status==='approved' && u.role!=='admin').map(u=>React.createElement('div', { key: u.username, className: "p-8 border-t" },
+                                    React.createElement('div', { className: "flex flex-col lg:flex-row gap-8" },
+                                        React.createElement('div', { className: "lg:w-1/4" }, React.createElement('div', { className: "text-2xl font-black text-indigo-600" }, u.username), React.createElement('div', { className: "text-xs opacity-50" }, u.org)),
+                                        React.createElement('div', { className: "lg:w-3/4 grid grid-cols-2 lg:grid-cols-3 gap-6" },
+                                            ['attitude', 'attendance', 'communication', 'skill', 'creative', 'ambition'].map(k => React.createElement('div', { key: k },
+                                                React.createElement('div', { className: "text-[10px] font-bold mb-1" }, k.toUpperCase()),
+                                                React.createElement('input', { type: "range", min: "1", max: "5", value: (u.stats||initialStats)[k], onChange:(e)=>handleUpdateStats(u.username, k, e.target.value), className: "w-full" })
+                                            ))
+                                        )
+                                    ),
+                                    React.createElement('input', { 
+                                        className: "mt-6 w-full p-3 bg-slate-50 rounded-xl border", 
+                                        placeholder: "寫入評語...", 
+                                        value: u.comment || '', 
+                                        onChange:(e)=>handleUpdateComment(u.username, e.target.value) 
+                                    })
+                                ))
+                            )
+                        )
+                    )
+                )
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(App));
+    </script>
+</body>
+</html>
